@@ -1,0 +1,7 @@
+{
+  "name": "chunked-message",
+  "author": "Michael Rhodes",
+  "version": "0.0.0",
+  "main": "index.js",
+  "license": "CC0-1.0"
+}
