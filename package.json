@@ -3,5 +3,11 @@
   "author": "Michael Rhodes",
   "version": "0.0.0",
   "main": "index.js",
-  "license": "CC0-1.0"
+  "license": "CC0-1.0",
+  "dependencies": {
+    "bitfield": "github:michaelrhodes/bitfield#8b21f4f6f9a41baa5b71e34790b1d5c06b82ff6d",
+    "chunks": "github:michaelrhodes/chunks#5da07cd5592e57ca626940b5bf04a6ac6f49d55b",
+    "hex": "github:michaelrhodes/hex#ed2d8bbcf8675b1c431a6145156c8ce0af0d433e",
+    "varint": "github:chrisdickinson/varint#30e24d424c278a4d4ee33d4a00910fc12af95e2b"
+  }
 }
