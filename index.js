@@ -35,10 +35,11 @@ function handleEvent (e) {
   this.read(e.data || e.detail)
 }
 
-function read (buf) {
-  var msg = parse(buf)
-  if (msg && msg.type === types.need) return onneed(this, msg)
-  if (msg && msg.type === types.chunk) return onchunk(this, msg)
+function read (buf, msg) {
+  if (msg = parse(buf)) {
+    if (msg.type === types.need) return onneed(this, msg)
+    if (msg.type === types.chunk) return onchunk(this, msg)
+  }
 }
 
 function send (buf, id) {
