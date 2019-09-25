@@ -44,9 +44,9 @@ function read (buf, msg) {
 function send (buf, id) {
   var ctx = this
 
-  // Indices will probably be less than 10 bytes,
+  // Indices will probably be less than 8 bytes,
   // but it’s simplest to just reserve the space
-  var header = 1 + id.byteLength + 10 + 10
+  var header = 1 + id.byteLength + 8 + 8
   var size = ctx.size - header
   var chunks = split(new Uint8Array(buf), size)
   ctx.haves.set(he(id), chunks)
