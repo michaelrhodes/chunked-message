@@ -4,10 +4,10 @@ var bitfield = require('bitfield')
 var invert = require('bitfield/invert')
 var split = require('chunks/split')
 var join = require('chunks/join')
-var xenc = require('hex/encode')
-var xdec = require('hex/decode')
-var ienc = require('varint/encode')
-var idec = require('varint/decode')
+var ve = require('varint/encode')
+var vd = require('varint/decode')
+var he = require('hex/encode')
+var hd = require('hex/decode')
 
 var types = { need: 0, chunk: 1 }
 
@@ -16,12 +16,11 @@ function ChunkedMessage (size, opts) {
     return new ChunkedMessage(size, opts)
   }
 
-  this.haves = new Map
-  this.needs = new Map
-
   opts = opts || {}
   this.incoming = opts.incoming
   this.outgoing = opts.outgoing
+  this.needs = new Map
+  this.haves = new Map
   this.size = size
 }
 
@@ -45,54 +44,64 @@ function read (buf, msg) {
 function send (buf, id) {
   var ctx = this
 
-  // 10 is the max. possible varint length
+  // Indices will probably be less than 10 bytes,
+  // but it’s simplest to just reserve the space
   var header = 1 + id.byteLength + 10 + 10
   var size = ctx.size - header
   var chunks = split(new Uint8Array(buf), size)
-  ctx.haves.set(xenc(id), chunks)
+  ctx.haves.set(he(id), chunks)
 
+  // Send the first chunk
   ctx.outgoing(chunk(id, {
-    lastIndex: ienc(chunks.length - 1),
-    index: ienc(0),
-    chunk: chunks.get(0)
+    chunk: chunks.get(0),
+    index: ve(0),
+    lastIndex: ve(chunks.length - 1)
   }))
 
+  console.log('[%s] sent chunk 1', fmt(he(id)))
+
+  // Begin countdown to cleanup
   chunks.atime = Date.now()
   cleanup(ctx, 5000)
 }
 
 // Someone is asking for something
 function onneed (ctx, msg, id) {
-  if (!ctx.haves.has(id = xenc(msg.id))) return
+  if (!ctx.haves.has(id = he(msg.id))) return
 
   var chunks = ctx.haves.get(id)
   var needed = bitfield(msg.body)
+  var last = chunks.length - 1
 
-  for (var i = 0, l = chunks.length; i < l; i++) {
+  console.log('[%s] received chunk request', fmt(id))
+
+  // Send them every chunk they need
+  for (var i = 0; i <= last; i++) {
     if (needed.get(i)) ctx.outgoing(chunk(msg.id, {
-      lastIndex: ienc(chunks.length - 1),
-      index: ienc(i),
-      chunk: chunks.get(i)
-    }))
+      chunk: chunks.get(i),
+      index: ve(i),
+      lastIndex: ve(last)
+    })),
+    console.log('[%s] sent chunk %s', fmt(id), i + 1)
   }
 
+  // Restart countdown to cleanup
   chunks.atime = Date.now()
   cleanup(ctx, 5000)
 }
 
 // Someone is sending you something
-function onchunk (ctx, msg, c) {
-  var lastIndex = idec(msg.body, c = 0)
-  var index = idec(msg.body, c += idec.bytes)
-  var chunk = msg.body.subarray(c += idec.bytes)
+function onchunk (ctx, msg, o) {
+  var lastIndex = vd(msg.body, o = 0)
+  var index = vd(msg.body, o += vd.bytes)
+  var chunk = msg.body.subarray(o += vd.bytes)
   var length = lastIndex + 1
 
-  var id = xenc(msg.id)
-  var existing = ctx.needs.has(id)
-  var chunks = existing && ctx.needs.get(id)
+  var id = he(msg.id)
+  var needed = ctx.needs.has(id)
+  var chunks = needed && ctx.needs.get(id)
 
-  // Setup stores
-  if (!existing) {
+  if (!needed) {
     chunks = join(length)
     chunks.have = bitfield(length)
     ctx.needs.set(id, chunks)
@@ -102,19 +111,21 @@ function onchunk (ctx, msg, c) {
   chunks.set(index, chunk)
   chunks.have.set(index, 1)
   chunks.mtime = Date.now()
-  console.log('received chunk %s', index + 1)
+
+  console.log('[%s] received chunk %s', fmt(id), index + 1)
 
   if (chunks.complete) return oncomplete(ctx, msg.id)
-  if (!existing) request(ctx, msg.id)
+  if (!needed) request(ctx, msg.id)
   cleanup(ctx, 5000)
 }
 
 // You have finished receiving something
 function oncomplete (ctx, id) {
-  var hid = xenc(id)
+  var hid = he(id)
   var buf = ctx.needs.get(hid).value
-  ctx.needs.delete(hid)
   ctx.incoming(buf, id)
+  ctx.needs.delete(hid)
+  console.log('[%s] received + cleaned up incoming', fmt(hid), buf)
 }
 
 function parse (buf) {
@@ -180,9 +191,10 @@ function chunk (id, body) {
 
 // Ask sender for the remaining chunks
 function request (ctx, id) {
-  var chunks = ctx.needs.get(xenc(id))
+  var chunks = ctx.needs.get(he(id))
   var needed = invert(chunks.have.buffer)
   ctx.outgoing(need(id, needed))
+  console.log('[%s] sent chunk request', fmt(he(id)))
 }
 
 // Remove stale messages
@@ -195,10 +207,10 @@ function cleanup (ctx, delay) {
 
     ctx.haves.forEach(function (have, id) {
       // Remove messages that haven’t been
-      // requested in over sixty seconds
+      // requested in over thirty seconds
       if (now - have.atime > 60000) {
-        console.log('cleaned up outgoing %s', id)
         ctx.haves.delete(id)
+        console.log('[%s] cleaned up outgoing', fmt(id))
       }
     })
 
@@ -206,16 +218,15 @@ function cleanup (ctx, delay) {
       // Remove incomplete messages that haven’t
       // received a chunk in over sixty seconds
       if (now - need.mtime > 60000) {
-        console.log('cleaned up incoming %s', id)
         ctx.needs.delete(id)
+        console.log('[%s] cleaned up incoming', fmt(id))
       }
 
       // Send a follow-up request for incomplete
       // messages that haven’t received a chunk
       // in over ten seconds
       else if (now - need.mtime > 10000) {
-        console.log('requested incoming %s', id)
-        request(ctx, xdec(id))
+        request(ctx, hd(id))
       }
     })
 
@@ -224,4 +235,10 @@ function cleanup (ctx, delay) {
       cleanup(ctx, 10000)
     }
   }
+}
+
+function fmt (id) {
+  return id.length > 8 ?
+   (id.substr(0, 5) + '..' + id.substr(-2)) :
+    id
 }
